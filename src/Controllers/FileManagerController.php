@@ -20,6 +20,7 @@ use Alexusmai\LaravelFileManager\FileManager;
 use Alexusmai\LaravelFileManager\Services\Zip;
 use Illuminate\Routing\Controller;
 use Illuminate\Http\Request;
+use App\MainDocument;
 
 class FileManagerController extends Controller
 {
@@ -46,7 +47,6 @@ class FileManagerController extends Controller
     public function initialize()
     {
         event(new BeforeInitialization());
-
         return response()->json(
             $this->fm->initialize()
         );
@@ -120,7 +120,8 @@ class FileManagerController extends Controller
             $request->input('disk'),
             $request->input('path'),
             $request->file('files'),
-            $request->input('overwrite')
+            $request->input('overwrite'),
+            $request->input('mainDir')
         );
 
         event(new FilesUploaded($request));
@@ -162,7 +163,8 @@ class FileManagerController extends Controller
             $this->fm->paste(
                 $request->input('disk'),
                 $request->input('path'),
-                $request->input('clipboard')
+                $request->input('clipboard'),
+                $request->input('mainDir')
             )
         );
     }
@@ -177,7 +179,6 @@ class FileManagerController extends Controller
     public function rename(RequestValidator $request)
     {
         event(new Rename($request));
-
         return response()->json(
             $this->fm->rename(
                 $request->input('disk'),
@@ -291,7 +292,8 @@ class FileManagerController extends Controller
         $createFileResponse = $this->fm->createFile(
             $request->input('disk'),
             $request->input('path'),
-            $request->input('name')
+            $request->input('name'),
+            $request->input('mainDir')
         );
 
         if ($createFileResponse['result']['status'] === 'success') {
@@ -346,7 +348,7 @@ class FileManagerController extends Controller
      */
     public function zip(RequestValidator $request, Zip $zip)
     {
-        return $zip->create();
+        return $zip->create($request->input('mainDir'));
     }
 
     /**
@@ -359,7 +361,7 @@ class FileManagerController extends Controller
      */
     public function unzip(RequestValidator $request, Zip $zip)
     {
-        return $zip->extract();
+        return $zip->extract($request->input('mainDir'));
     }
 
     /**
@@ -412,5 +414,24 @@ class FileManagerController extends Controller
     public function fmButton()
     {
         return view('file-manager::fmButton');
+    }
+
+    public function index(){
+        $table_data = MainDocument::all();
+			return response()
+				->json([
+                    'model' => $table_data,
+                    'status'=> 'success'
+				]);
+    }
+
+    
+    public function indexCu(RequestValidator $request){
+        $table_data = MainDocument::where('id_cu',$request->input('idCu'))->get();
+			return response()
+				->json([
+                    'model' => $table_data,
+                    'status'=> 'success'
+				]);
     }
 }

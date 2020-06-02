@@ -1,9 +1,9 @@
 <?php
 
 namespace Alexusmai\LaravelFileManager\Services\ConfigService;
-
+use Auth;
+use App\Cu;
 /**
- * Class DefaultConfigRepository
  *
  * @package Alexusmai\LaravelFileManager\Services\ConfigService
  */
@@ -54,7 +54,18 @@ class DefaultConfigRepository implements ConfigRepository
      */
     public function getLeftPath(): ?string
     {
-        return config('file-manager.leftPath');
+        $id = Auth::user()->getIdCu();
+        $user = Auth::user();
+        if($id!=0 || !$user->can['index_disk_cu']){
+            $cu = 'BKCU';
+            if($id!=0){
+                $cu = Cu::findOrFail($id)->name;
+            }
+            return $cu;
+        }else{
+            return config('file-manager.leftPath');
+        }
+            
     }
 
     /**

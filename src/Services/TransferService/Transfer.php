@@ -27,14 +27,14 @@ abstract class Transfer
      *
      * @return array
      */
-    public function filesTransfer()
+    public function filesTransfer($idCu)
     {
         try {
             // determine the type of operation
             if ($this->clipboard['type'] === 'copy') {
-                $this->copy();
+                $this->copy($idCu);
             } elseif ($this->clipboard['type'] === 'cut') {
-                $this->cut();
+                $this->cut($idCu);
             }
         } catch (\Exception $exception) {
             return [
@@ -53,7 +53,7 @@ abstract class Transfer
         ];
     }
 
-    abstract protected function copy();
+    abstract protected function copy($idCu);
 
-    abstract protected function cut();
+    abstract protected function cut($idCu);
 }

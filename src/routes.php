@@ -22,7 +22,10 @@ Route::group([
 
     Route::get('initialize', 'FileManagerController@initialize')
         ->name('fm.initialize');
-
+    Route::get('index', 'FileManagerController@index')
+        ->name('fm.index');
+    Route::get('indexCu', 'FileManagerController@indexCu')
+        ->name('fm.indexCu');
     Route::get('content', 'FileManagerController@content')
         ->name('fm.content');
 

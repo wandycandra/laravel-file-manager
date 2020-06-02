@@ -12,11 +12,16 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Arr;
 use Storage;
 use Image;
+use Auth;
+use App\Cu;
+use App\MainDocument;
 
 class FileManager
 {
     use PathTrait, ContentTrait, CheckTrait;
-
+    private  $idUser;
+    private $idCu;
+    private $cuName;
     /**
      * @var ConfigRepository
      */
@@ -30,6 +35,13 @@ class FileManager
     public function __construct(ConfigRepository $configRepository)
     {
         $this->configRepository = $configRepository;
+        $this->idUser = Auth::user()->id;
+        $this->idCu = Auth::user()->getIdCu();
+        if($this->idCu==0){
+            $this->cuName='BKCU';
+        }else{
+            $this->cuName = Cu::findOrFail($this->idCu)->name;
+        }        
     }
 
     /**
@@ -58,7 +70,7 @@ class FileManager
             'windowsConfig' => $this->configRepository->getWindowsConfig(),
             'hiddenFiles'   => $this->configRepository->getHiddenFiles(),
         ];
-
+       
         // disk list
         foreach ($this->configRepository->getDiskList() as $disk) {
             if (array_key_exists($disk, config('filesystems.disks'))) {
@@ -67,7 +79,6 @@ class FileManager
                 );
             }
         }
-
         // get language
         $config['lang'] = app()->getLocale();
 
@@ -90,9 +101,9 @@ class FileManager
      */
     public function content($disk, $path)
     {
+        
         // get content for the selected directory
         $content = $this->getContent($disk, $path);
-
         return [
             'result'      => [
                 'status'  => 'success',
@@ -113,6 +124,7 @@ class FileManager
      */
     public function tree($disk, $path)
     {
+       
         $directories = $this->getDirectoriesTree($disk, $path);
 
         return [
@@ -134,8 +146,12 @@ class FileManager
      *
      * @return array
      */
-    public function upload($disk, $path, $files, $overwrite)
+    public function upload($disk, $path, $files, $overwrite, $mainDir)
     {
+        if($this->idCu==0 && $mainDir!=null && $mainDir!='BKCU'){
+            $id = Cu::where('name', $mainDir)->get();
+            $this->idCu = $id[0]->id;
+        }
         $fileNotUploaded = false;
 
         foreach ($files as $file) {
@@ -149,7 +165,7 @@ class FileManager
 
             // check file size if need
             if ($this->configRepository->getMaxUploadFileSize()
-                && $file->getSize() / 1024 > $this->configRepository->getMaxUploadFileSize()
+                && $file->getClientSize() / 1024 > $this->configRepository->getMaxUploadFileSize()
             ) {
                 $fileNotUploaded = true;
                 continue;
@@ -172,6 +188,23 @@ class FileManager
                 $file,
                 $file->getClientOriginalName()
             );
+            $file_type = $file->getClientOriginalExtension();
+            $file_name = pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME);
+            $file_path='';
+            if($path==''){
+                $file_path = '/storage/'.$file->getClientOriginalName();
+            }else{
+                $file_path = '/storage/'.$path.'/'.$file->getClientOriginalName();
+            }
+            if(file_exists(public_path().$file_path)){
+                $input['id_cu'] = $this->idCu;
+                $input['id_user'] = $this->idUser;
+                $input['file_name'] = $file_name;
+                $input['file_type'] = $file_type;
+                $input['file_path'] = $file_path;
+                $input['name'] = $file_name.'.'.$file_type;
+                MainDocument::create($input);
+            }
         }
 
         // If the some file was not uploaded
@@ -203,33 +236,54 @@ class FileManager
     public function delete($disk, $items)
     {
         $deletedItems = [];
-
-        foreach ($items as $item) {
-            // check all files and folders - exists or no
-            if (!Storage::disk($disk)->exists($item['path'])) {
-                continue;
-            } else {
-                if ($item['type'] === 'dir') {
-                    // delete directory
-                    Storage::disk($disk)->deleteDirectory($item['path']);
+            foreach ($items as $item) {
+                // check all files and folders - exists or no
+                if (!Storage::disk($disk)->exists($item['path'])) {
+                    continue;
                 } else {
-                    // delete file
-                    Storage::disk($disk)->delete($item['path']);
+                    if ($item['type'] === 'dir') {
+                        // delete directory
+                        if(strpos($item['path'],"/")==true){
+                            $files = Storage::disk($disk)->allFiles($item['path']);
+                            //deleting data in database
+                            if(!empty($files)){
+                                for ($i=0; $i < count($files) ; $i++) { 
+                                    $file_path = '/storage/'.$files[$i];
+                                    MainDocument::where('file_path',$file_path)->delete();              
+                                }
+                            }
+                            Storage::disk($disk)->deleteDirectory($item['path']);
+                        }else{
+                            return [
+                                'result' => [
+                                    'status'  => 'fail',
+                                    'message' => 'cannot delete this folder',
+                                ],
+                            ];
+                        }
+                        
+                    } else {
+                        // delete file
+                        Storage::disk($disk)->delete($item['path']);
+                        //deleting data in database
+                        $file_path ='/storage/'.$item['path'];
+                        MainDocument::where('file_path',$file_path)->delete();
+                    }
                 }
+    
+                // add deleted item
+                $deletedItems[] = $item;
             }
-
-            // add deleted item
-            $deletedItems[] = $item;
-        }
-
-        event(new Deleted($disk, $deletedItems));
-
-        return [
-            'result' => [
-                'status'  => 'success',
-                'message' => 'deleted',
-            ],
-        ];
+    
+            event(new Deleted($disk, $deletedItems));
+    
+            return [
+                'result' => [
+                    'status'  => 'success',
+                    'message' => 'deleted',
+                ],
+            ];
+        
     }
 
     /**
@@ -241,19 +295,49 @@ class FileManager
      *
      * @return array
      */
-    public function paste($disk, $path, $clipboard)
+    public function paste($disk, $path, $clipboard, $mainDir)
     {
         // compare disk names
+        if($this->idCu==0 && $mainDir!=null && $mainDir!='BKCU'){
+            $id = Cu::where('name', $mainDir)->get();
+            $this->idCu = $id[0]->id;
+        }
         if ($disk !== $clipboard['disk']) {
 
             if (!$this->checkDisk($clipboard['disk'])) {
                 return $this->notFoundMessage();
             }
         }
-
         $transferService = TransferFactory::build($disk, $path, $clipboard);
-
-        return $transferService->filesTransfer();
+        $files = $clipboard['files'];
+            if(count($clipboard['files'])>0){
+                for ($i=0; $i < count($files) ; $i++) { 
+                    $file_path = '/storage/'.$files[$i];
+                    //if copy
+                    if($clipboard['type']=='copy'){
+                        $file = MainDocument::select('file_name','file_type','name')->where('file_path',$file_path)->get();
+                        $input['id_cu'] = $this->idCu;
+                        $input['id_user'] = $this->idUser;
+                        $input['file_name'] = $file[0]->file_name;
+                        $input['file_type'] = $file[0]->file_type;
+                        $input['file_path'] = '';
+                        if($path==''){
+                            $input['file_path'] = '/storage/'.$file[0]->name;    
+                        }else{
+                            $input['file_path'] = '/storage/'.$path.'/'.$file[0]->name;
+                        }
+                        $input['name'] = $file[0]->name;
+                        $file_check = MainDocument::select('file_name','file_type','name')->where('file_path','/storage/'.$path.'/'.$file[0]->name)->get();
+                        if($file_check->count()<=0){
+                            MainDocument::create($input);
+                        }
+                    }
+                } 
+                return $transferService->filesTransfer($this->idCu);  
+            }else{
+                return $transferService->filesTransfer($this->idCu);
+            }
+        
     }
 
     /**
@@ -267,7 +351,35 @@ class FileManager
      */
     public function rename($disk, $newName, $oldName)
     {
-        Storage::disk($disk)->move($oldName, $newName);
+        $isDir = is_dir(public_path().'/storage/'.$oldName);
+        //if not a directory
+        if(!$isDir){
+            $info = pathinfo($newName);
+            $file_type= $info['extension'];
+            $file_name = $info['filename'];
+            $name = $file_name.'.'.$file_type;
+            $file_path_old = '/storage/'.$oldName;
+            $file_path_new = '/storage/'.$newName;
+            Storage::disk($disk)->move($oldName, $newName);
+            MainDocument::where('file_path',$file_path_old)->update(['file_path'=>$file_path_new,'file_name'=>$file_name,'file_type'=>$file_type,'name'=>$name]);
+        }else{
+            //if directory
+            if($oldName==$this->cuName){
+                return [
+                    'result' => [
+                        'status'  => 'fail',
+                        'message' => 'cannot rename this folder',
+                    ],
+                ];
+            }else{
+            $files = Storage::disk('storage')->allFiles($oldName);
+            Storage::disk($disk)->move($oldName, $newName);
+            $files2 = Storage::disk('storage')->allFiles($newName);
+            for($i=0; $i<count($files);$i++){
+            MainDocument::where('file_path','/storage/'.$files[$i])->update(['file_path'=>'/storage/'.$files2[$i]]);
+                }
+            }
+        }
 
         return [
             'result' => [
@@ -419,11 +531,15 @@ class FileManager
      *
      * @return array
      */
-    public function createFile($disk, $path, $name)
+    public function createFile($disk, $path, $name, $mainDir)
     {
         // path for new file
+        if($this->idCu==0 && $mainDir!=null && $mainDir!='BKCU'){
+            $id = Cu::where('name', $mainDir)->get();
+            $this->idCu = $id[0]->id;
+        }
+        
         $path = $this->newPath($path, $name);
-
         // check - exist file or no
         if (Storage::disk($disk)->exists($path)) {
             return [
@@ -439,7 +555,14 @@ class FileManager
 
         // get file properties
         $fileProperties = $this->fileProperties($disk, $path);
-
+        //adding to database
+        $input['id_cu'] = $this->idCu;
+        $input['id_user'] = $this->idUser;
+        $input['name'] = $fileProperties['basename'];
+        $input['file_type'] = $fileProperties['extension'];
+        $input['file_path'] = '/storage/'.$fileProperties['path'];
+        $input['file_name'] = $fileProperties['filename'];
+        MainDocument::create($input);
         return [
             'result' => [
                 'status'  => 'success',

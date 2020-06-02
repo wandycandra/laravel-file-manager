@@ -23,10 +23,8 @@ trait ContentTrait
 
         // get a list of directories
         $directories = $this->filterDir($disk, $content);
-
         // get a list of files
         $files = $this->filterFile($disk, $content);
-
         return compact('directories', 'files');
     }
 
